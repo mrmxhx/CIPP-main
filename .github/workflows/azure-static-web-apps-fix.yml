@@ -1,38 +1,64 @@
-name: Azure Static Web Apps CI/CD
+name: CIPP Frontend – Azure Static Web Apps CI/CD
 
 on:
   push:
     branches:
       - main
-      - master
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
       - main
-      - master
 
 jobs:
   build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed')
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Build And Deploy
+          lfs: false
+
+      # Build with GitHub-hosted Node instead of Oryx.
+      # Oryx only ships a fixed list of Node builds and rejects the
+      # engines.node range upstream now pins (^22.22.2), so we build here
+      # and hand SWA a pre-built ./out folder.
+      - name: Set up Node.js (version from package.json engines.node)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build
+        run: npm run build
+
+      - name: Stamp version.json with commit
+        run: |
+          VERSION=$(jq -r '.version' public/version.json)
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "{\"version\": \"${VERSION}\", \"commit\": \"${SHORT_SHA}\"}" > out/version.json
+
+      - name: Copy SWA config into build output
+        run: cp staticwebapp.config.json out/
+
+      - name: Deploy to Azure Static Web Apps
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_FLOWER_01F5DB310 }} # change this to your repository secret name
-          repo_token: ${{ secrets.GITHUB_TOKEN }} # Used for Github integrations (i.e. PR comments)
-          action: "upload"
-          ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
-          # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "/out" # Built app content directory - optional
-          ###### End of Repository/Build Configurations ######
+          # >>> Replace with the secret name from your existing workflow file <<<
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_FLOWER_01F5DB310 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: out          # pre-built output, not source
+          api_location: ''
+          output_location: ''
+          skip_app_build: true       # do NOT let Oryx touch it
+          skip_api_build: true
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
@@ -43,5 +69,6 @@ jobs:
         id: closepullrequest
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_FLOWER_01F5DB310 }} # change this to your repository secret name
-          action: "close"
+          # >>> Same secret name as above <<<
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_FLOWER_01F5DB310 }}
+          action: close
